@@ -24,3 +24,4 @@ dev_local_include/
 __pycache__/
 .DS_Store
 node_modules/
+.ipynb_checkpoints/
