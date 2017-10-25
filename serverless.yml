@@ -1,0 +1,173 @@
+# Welcome to Serverless!
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+# Service name
+service: scraper 
+
+provider:
+  name: aws
+  runtime: python3.6
+  # Instead of using predefined role, the role is created below
+  # role: arn:aws:iam::788769002630:role/lambda_dynamodb_full
+
+  stage: dev
+  region: eu-west-1
+
+# Define service wide environment variables here
+# Access in python via os.environ['MY_VAR']
+  environment:
+    url_persistence_table_name: ${self:service}-image-urls
+    query_persistence_table_name: ${self:service}-queries
+
+# you can add statements to the Lambda function's IAM Role here
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:*"
+      Resource: "arn:aws:dynamodb:eu-west-1:*:*"
+    - Effect: "Allow"
+      Action:
+        - "s3:*"
+      Resource: "arn:aws:s3:::*"
+    - Effect: "Allow"
+      Action: [
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarmHistory",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:DescribeAlarmsForMetric",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics",
+                "cloudwatch:PutMetricAlarm",
+            ]
+      Resource: "arn:aws:cloudwatch:::*"
+    - Effect: "Allow"
+      Action: 
+        - "logs:*"
+      Resource: "arn:aws:logs:::*"
+    - Effect: "Allow"
+      Action: 
+        - "xray:*"
+      Resource: "arn:aws:xray:::*"
+ 
+
+# you can add packaging information here
+package:
+#  include:
+#    - include-me.py
+#    - include-me-dir/**
+ exclude:
+   - node_modules/**
+   - __pycache__/**
+   - download_image/dev_local_include/**
+   - download_image/__pycache__/**
+   - download_image/vendor/__pycache__/**
+   - tmp/**
+   - scrape_images/vendor/phantomjs_osx
+
+functions:
+  downloadImage:
+    handler: download_image/download.download
+    memorySize: 128
+    timeout: 180
+    # events:
+    #   - stream:
+    #     type: dynamodb
+    #     arn:
+    #       Fn::GetAtt:
+    #         - ${self:service}-image-urls
+    #         - StreamArn
+    #     batchSize: 1
+  scrapeQuery:
+    handler: scrape_images/scrape.scrape
+    memorySize: 512
+    timeout: 300
+# Add CloudFormation resource templates here
+resources:  
+  Resources:
+    UrlsTable:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        TableName: ${self:provider.environment.url_persistence_table_name}
+        AttributeDefinitions:
+        - AttributeName: "url"
+          AttributeType: "S"
+        KeySchema:
+        - AttributeName: "url"
+          KeyType: "HASH"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+    UrlsTableEvent:
+      Type: AWS::Lambda::EventSourceMapping
+      Properties:
+        BatchSize: 20
+        EventSourceArn:
+          Fn::GetAtt:
+            - UrlsTable
+            - StreamArn      
+        FunctionName:
+          Fn::GetAtt:
+            - DownloadImageLambdaFunction
+            - Arn
+        StartingPosition: TRIM_HORIZON
+
+    QueriesTable:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        TableName: ${self:provider.environment.query_persistence_table_name}
+        AttributeDefinitions:
+        - AttributeName: "query"
+          AttributeType: "S"
+        KeySchema:
+        - AttributeName: "query"
+          KeyType: "HASH"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
+    QueriesTableEvent:
+      Type: AWS::Lambda::EventSourceMapping
+      Properties:
+        BatchSize: 1
+        EventSourceArn:
+          Fn::GetAtt:
+            - QueriesTable
+            - StreamArn      
+        FunctionName:
+          Fn::GetAtt:
+            - ScrapeQueryLambdaFunction
+            - Arn
+        StartingPosition: TRIM_HORIZON
+
+plugins:
+#   - serverless-python-requirements
+  - serverless-dynamodb-autoscaling
+
+custom:
+  capacities:
+    - table: UrlsTable # DynamoDB Resource
+      read:
+        minimum: 5        # Minimum read capacity
+        maximum: 100     # Maximum read capacity
+        usage: 0.80       # Targeted usage percentage
+      write:
+        minimum: 5       # Minimum write capacity
+        maximum: 100      # Maximum write capacity
+        usage: 0.8        # Targeted usage percentage
+    - table: QueriesTable # DynamoDB Resource
+      read:
+        minimum: 1        # Minimum read capacity
+        maximum: 10     # Maximum read capacity
+        usage: 0.80       # Targeted usage percentage
+      write:
+        minimum: 1       # Minimum write capacity
+        maximum: 10      # Maximum write capacity
+        usage: 0.8        # Targeted usage percentage
+    

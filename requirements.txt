@@ -1,0 +1,4 @@
+requests == 2.*
+fnvhash == 0.1.*
+pillow == 4.* #no-deploy
+boto3 #no-deploy
