@@ -69,7 +69,7 @@ package:
    - scrape_images/vendor/phantomjs_osx
    - .git/**
    - "*.ipynb"
-
+   - .ipynb_checkpoints/**
 
 functions:
   downloadImage:
