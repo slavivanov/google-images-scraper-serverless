@@ -67,6 +67,9 @@ package:
    - download_image/vendor/__pycache__/**
    - tmp/**
    - scrape_images/vendor/phantomjs_osx
+   - .git/**
+   - "*.ipynb"
+
 
 functions:
   downloadImage:
