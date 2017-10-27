@@ -25,33 +25,41 @@ def persist_gimages(query, urls):
         if not url:
             continue
         start_time = timer()
-        if url[:5] == 'data:':
-            # base64 encoded image, save directly to S3
-            image_type, image_extension, data = prepare_base64_image(url)
-            retrieval_method = 'embedded'
+        if is_base64_encoded(url):
+            # base64 encoded image, save directly to file storage
+            persist_base64_encoded(url, category_name, file_persister)
             num_embedded += 1
-            # Save the data to S3
-            hashed = str(fnv32a_hash(str(url[:1000])))
-            filename = hashed + '.' + image_extension
-            key = os.path.join(category_name, filename)
-            try:
-                file_persister.put_object(data, key, ContentType=image_type)
-            except Exception as e:
-                print('Could not save item {}. Error: {}'.format(
-                    index, str(e)))
         elif url[:4] == 'http':
-            # download the image later, persist in Dynamo DB
+            # download the image later, persist in database
             url_persister.put_batch(url, category_name=category_name)
-            retrieval_method = 'download later'
-            num_urls += 1 
-        elapsed_time = timer() - start_time
+            num_urls += 1
     url_persister.flush_batch()
     mark_query_retrieved(query, num_embedded + num_urls)
     print('Number of embedded images: {}'.format(num_embedded))
     print('Number of links: {}'.format(num_urls))
     print('Done in {:.2f}s'.format(timer() - func_start_time))
 
+def is_base64_encoded(data):
+    # Base64 encoded images start with 'data:'
+    return data[:5] == 'data:'
+
+def persist_base64_encoded(data, category_name, file_persister):
+    """ Persist a base64 encoded image. """
+    image_type, image_extension, data = prepare_base64_image(data)
+    # Save the data to S3
+    # Unique key from the contents
+    hashed = str(fnv32a_hash(str(data[:1000])))
+    filename = hashed + '.' + image_extension
+    key = os.path.join(category_name, filename)
+    try:
+        file_persister.put_object(data, key, ContentType=image_type)
+    except Exception as e:
+        print('Could not save item {}. Error: {}'.format(
+            index, str(e)))
+
+
 def prepare_base64_image(data):
+    """ Prepate a base64 encode image to be saved. """
     # Currently all images are JPEG
     image_type = 'image/jpeg'
     # From 'image/jpeg' to 'jpeg'
@@ -64,10 +72,12 @@ def prepare_base64_image(data):
         # The actual base64 encoded image
         data = data[data.find(",")+1:]
     decoded_image = base64.b64decode(data)
-    return image_type, image_extension, data
+    img_bytes = BytesIO(decoded_image)
+    img_bytes_jpeg = convert_bytes_to_jpeg(img_bytes)
+    return image_type, image_extension, img_bytes_jpeg
         
 def mark_query_retrieved(query, num_items):
-    """ Mark the query in Dynamo DB as retrieved. """
+    """ Mark the query as retrieved. """
     from lib.query_persistence_dynamo import QueryPersistenceDynamo
     query_persister = QueryPersistenceDynamo()
     from datetime import datetime, timezone
